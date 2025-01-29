@@ -1,4 +1,4 @@
-﻿open Microsoft.Playwright
+open Microsoft.Playwright
 // Playwright is very heavy on task methods we'll need this
 open System.Threading.Tasks
 open FSharp.Control.Tasks
@@ -34,7 +34,10 @@ module Types =
             date: string
         }
 
-module Utils = 
+module TextUtils =
+    let regexStrip (pat: string) (inp: string) : string = System.Text.RegularExpressions.Regex.Replace(inp, pat, "", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+open TextUtils
+module Utils =
     open Types
     let getBrowser (kind: Browser) (getPlaywright: Task<IPlaywright>) =
         task {
@@ -115,24 +118,69 @@ module Utils =
                   summary = $"{summary}..."
                   date = date }
         }
+    let getLink (element: IElementHandle) =
+        task {
+            return! element.GetAttributeAsync("href")
+        }
+
+    let getContent (element: IElementHandle) =
+        task {
+            return! element.TextContentAsync()
+        }
+    let doToNonNullElement defaultValue (fn: IElementHandle -> Task<'a>) (element: Task<IElementHandle>) =
+        task {
+            let! element2 = element
+            if element2 = null then
+                return defaultValue 
+            else
+                try
+                    return! fn element2
+                with _ -> return ""
+        }
+
+    let getContentTask (element: Task<IElementHandle>) =
+        doToNonNullElement "" (fun x -> x.TextContentAsync()) element
+        
+    let getLinkTask = doToNonNullElement "" (fun element -> element.GetAttributeAsync("href"))
+
     let getPostSummaries (getPage: Task<IPage>) =
         task {
             let! page = getPage
             //  The first scrapping part, we'll get all of the elements that have
             // the "card-content" class
-            let! cards = page.QuerySelectorAllAsync(".card-content")
-            printfn $"Getting Cards from the landing page: {cards.Count}"
+            let! bioLink = page.QuerySelectorAllAsync(".strong.member-name a")
+            printfn $"Getting Cards from the landing page: {bioLink.Count}"
             return!
-                cards
+                bioLink
                 // we'll convert the readonly list to an array
                 |> Seq.toArray
                 // we'll use the `Parallel` module to precisely process each post
                 // in parallel and apply the `convertElementToPost` function
-                |> Array.Parallel.map convertElementToPost
+                |> Array.Parallel.map getLink
                 // at this point we have a  Task<Post>[]
                 // so we'll pass it to the next function to ensure all of the tasks
                 // are resolved
                 |> Task.WhenAll // return a Task<Post[]>
+        }
+    let getBioDetails (getPage: Task<IPage>) =
+        task {
+            let! page = getPage
+            let! pageTitle = page.QuerySelectorAsync("h1.page-title") |> getContentTask
+            let! contactlocation = page.QuerySelectorAsync(".field--name-field-person-contactlocation div.field__item") |> getContentTask
+            let! phoneH = page.QuerySelectorAsync(".field--name-field-bio-phone-h div.field__item") |> getContentTask
+            let! phoneO = page.QuerySelectorAsync(".field--name-field-bio-phone-o div.field__item") |> getContentTask
+            let! phoneC = page.QuerySelectorAsync(".field--name-field-bio-phone-c div.field__item") |> getContentTask
+            let! email = page.QuerySelectorAsync(".field--name-field-person-email2 a") |> getLinkTask
+                
+            return 
+                {|
+                    repName = pageTitle |> _.Trim() // |> regexStrip @"^Representative\s+"
+                    contactlocation = contactlocation
+                    phoneH = phoneH
+                    phoneO = phoneO
+                    phoneC = phoneC
+                    email = email
+                |}
         }
     let getPage (url: string) (getBrowser: Task<IBrowser>) =
         task {
@@ -165,19 +213,38 @@ module Utils =
                 JsonSerializer.SerializeToUtf8Bytes(posts, opts)
 
             printfn "Saving to \"./posts.json\""
-            // write those bytes to dosk
             return! File.WriteAllBytesAsync("./posts.json", json)
         }
+
 open Utils
 open Types
 [<EntryPoint>]
 let main _ =
-    Playwright.CreateAsync()
-    |> getBrowser Firefox
-    |> getPage "https://blog.tunaxor.me"
+    let root = @"https://ndlegis.gov"
+    let basePage = $@"{root}/assembly/69-2025/regular/members"
+    let getPWatURL basePage =
+        Playwright.CreateAsync()
+        |> getBrowser Firefox
+        |> getPage basePage
+
+    getPWatURL basePage
     |> getPostSummaries
-    |> writePostsToFile
     |> Async.AwaitTask
     |> Async.RunSynchronously
-
+    |> Seq.map
+        (fun p ->
+            root + p
+            |> getPWatURL
+            |> getBioDetails
+            |> fun x -> x
+            |> Async.AwaitTask
+            |> Async.RunSynchronously
+            //|> Seq.toList
+            |> fun x -> 
+                System.Diagnostics.Debugger.Break()
+                x
+            |> ignore
+        )
+    |> Seq.toList
+    |> ignore
     0
