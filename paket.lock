@@ -8,6 +8,9 @@ NUGET
       Microsoft.Bcl.AsyncInterfaces (>= 6.0) - restriction: >= netstandard2.0
       System.ComponentModel.Annotations (>= 5.0) - restriction: >= netstandard2.0
       System.Text.Json (>= 6.0.10) - restriction: >= netstandard2.0
+    Ply (0.3.1)
+      FSharp.Core (>= 4.6.2) - restriction: >= netstandard2.0
+      System.Threading.Tasks.Extensions (>= 4.5.4) - restriction: >= netstandard2.0
     System.Buffers (4.6) - restriction: || (&& (>= net462) (>= netstandard2.0)) (&& (< net8.0) (>= netstandard2.0)) (&& (< netcoreapp2.1) (>= netstandard2.0))
     System.ComponentModel.Annotations (5.0) - restriction: >= netstandard2.0
     System.IO.Pipelines (9.0.1) - restriction: || (&& (>= net462) (>= netstandard2.0)) (&& (>= net8.0) (< net9.0)) (&& (< net8.0) (>= netstandard2.0))
@@ -33,6 +36,6 @@ NUGET
       System.Text.Encodings.Web (>= 9.0.1) - restriction: || (>= net462) (&& (>= net8.0) (< net9.0)) (&& (< net8.0) (>= netstandard2.0))
       System.Threading.Tasks.Extensions (>= 4.5.4) - restriction: || (>= net462) (&& (< net8.0) (>= netstandard2.0))
       System.ValueTuple (>= 4.5) - restriction: >= net462
-    System.Threading.Tasks.Extensions (4.6) - restriction: || (&& (>= net462) (>= netstandard2.0)) (&& (< net8.0) (>= netstandard2.0)) (&& (>= netstandard2.0) (< netstandard2.1))
+    System.Threading.Tasks.Extensions (4.6) - restriction: >= netstandard2.0
       System.Runtime.CompilerServices.Unsafe (>= 6.1) - restriction: || (>= net462) (&& (< netcoreapp2.1) (>= netstandard2.0))
     System.ValueTuple (4.5) - restriction: && (>= net462) (>= netstandard2.0)
