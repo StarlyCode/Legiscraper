@@ -1,11 +1,7 @@
 open Microsoft.Playwright
-// Playwright is very heavy on task methods we'll need this
 open System.Threading.Tasks
 open FSharp.Control.Tasks
-// This one is to write to disk
 open System.IO
-// Json serialization
-open System.Text.Json
 module Types =
     // Playwright offers different browsers so let's
     // declare a Discrimiated union with our choices
@@ -62,62 +58,7 @@ module Utils =
                 | Firefox -> pl.Firefox.LaunchAsync()
                 | Webkit -> pl.Webkit.LaunchAsync()
         }
-    let convertElementToPost (element: IElementHandle) =
-        task {
-            // steps 1, 2 y 3
-            let! headerContent = element.QuerySelectorAsync(".title")
-            let! author = element.QuerySelectorAsync(".subtitle a")
-            let! content = element.QuerySelectorAsync(".content")
-            // step 4
-            let! title = headerContent.InnerTextAsync()
-            let! authorText = author.InnerTextAsync()
-            let! rawContent = content.InnerTextAsync()
-            // step 5
-            let summaryParts = rawContent.Split("...")
-
-            let summary =
-                // step 6
-                summaryParts
-                |> Array.tryHead
-                |> Option.defaultValue ""
-
-            // try to split the tags and the date
-            let extraParts =
-                // step 7
-                (summaryParts
-                 |> Array.tryLast
-                 // we'll default to a single character string to ensure we will have
-                 // at least an array with two elements ["", ""]
-                 |> Option.defaultValue "\n")
-                    .Split '\n'
-
-            // split the tags given that each has a '#' and trim it, remove it if it's whitespace
-
-            let tags =
-                // step 7.1
-                (extraParts
-                 |> Array.tryHead
-                 |> Option.defaultValue "")
-                    .Split('#')
-                // step 7.2
-                |> Array.map (fun s -> s.Trim())
-                |> Array.filter (System.String.IsNullOrWhiteSpace >> not)
-
-            let date =
-                // step 7.3
-                extraParts
-                |> Array.tryLast
-                |> Option.defaultValue ""
-
-            printfn $"Parsed: {title} - {authorText}"
-            // return el post
-            return
-                { title = title
-                  author = authorText
-                  tags = tags
-                  summary = $"{summary}..."
-                  date = date }
-        }
+    
     let getLink (element: IElementHandle) =
         task {
             return! element.GetAttributeAsync("href")
@@ -135,7 +76,7 @@ module Utils =
             else
                 try
                     return! fn element2
-                with _ -> return ""
+                with _ -> return defaultValue
         }
 
     let getContentTask (element: Task<IElementHandle>) =
@@ -170,7 +111,19 @@ module Utils =
             let! phoneH = page.QuerySelectorAsync(".field--name-field-bio-phone-h div.field__item") |> getContentTask
             let! phoneO = page.QuerySelectorAsync(".field--name-field-bio-phone-o div.field__item") |> getContentTask
             let! phoneC = page.QuerySelectorAsync(".field--name-field-bio-phone-c div.field__item") |> getContentTask
-            let! email = page.QuerySelectorAsync(".field--name-field-person-email2 a") |> getLinkTask
+            let! email = page.QuerySelectorAsync(".field--name-field-person-email2 a") |> getLinkTask 
+            let! bioLines = 
+                page.QuerySelectorAllAsync(".flexbox-item.biography-biography-wrapper li") 
+            let! bioLines =
+                bioLines
+                |> Seq.map getContent
+                |> Task.WhenAll
+            let bioLines = bioLines |> Seq.toList
+
+            let bioLine num = 
+                bioLines
+                |> List.tryItem num
+                |> Option.defaultValue ""
                 
             return 
                 {|
@@ -179,7 +132,16 @@ module Utils =
                     phoneH = phoneH
                     phoneO = phoneO
                     phoneC = phoneC
-                    email = email
+                    email = email |> regexStrip @"^mailto:"
+                    bio1 = bioLine 0
+                    bio2 = bioLine 1
+                    bio3 = bioLine 2
+                    bio4 = bioLine 3
+                    bio5 = bioLine 4
+                    bio6 = bioLine 5
+                    bio7 = bioLine 6
+                    bio8 = bioLine 7
+                    bio9 = bioLine 8
                 |}
         }
     let getPage (url: string) (getBrowser: Task<IBrowser>) =
@@ -199,52 +161,44 @@ module Utils =
 
             return page
         }
-    let writePostsToFile (getPosts: Task<Post array>) =
-        task {
-            let! posts = getPosts
-
-            let opts =
-                let opts = JsonSerializerOptions()
-                opts.WriteIndented <- true
-                opts
-
-            let json =
-                // serialize the array with the base class library System.Text.Json
-                JsonSerializer.SerializeToUtf8Bytes(posts, opts)
-
-            printfn "Saving to \"./posts.json\""
-            return! File.WriteAllBytesAsync("./posts.json", json)
-        }
-
+  
 open Utils
 open Types
 [<EntryPoint>]
 let main _ =
     let root = @"https://ndlegis.gov"
-    let basePage = $@"{root}/assembly/69-2025/regular/members"
-    let getPWatURL basePage =
+    let basePage ix = $@"{root}/assembly/69-2025/regular/members?page=%i{ix}"
+    let browser = 
         Playwright.CreateAsync()
         |> getBrowser Firefox
+    let getPWatURL basePage =
+        browser
         |> getPage basePage
-
-    getPWatURL basePage
-    |> getPostSummaries
-    |> Async.AwaitTask
-    |> Async.RunSynchronously
+    [ 0 .. 8 ]
     |> Seq.map
-        (fun p ->
-            root + p
-            |> getPWatURL
-            |> getBioDetails
-            |> fun x -> x
+        (fun ix -> 
+            let url = basePage ix
+            getPWatURL url
+            |> getPostSummaries
             |> Async.AwaitTask
             |> Async.RunSynchronously
-            //|> Seq.toList
-            |> fun x -> 
-                System.Diagnostics.Debugger.Break()
-                x
-            |> ignore
+            |> Seq.map
+                (fun p ->
+                    root + p
+                    |> getPWatURL
+                    |> getBioDetails
+                    |> Async.AwaitTask
+                    |> Async.RunSynchronously
+                    |> fun x -> 
+                        {| x with URL = url |}
+                )
+            //|> Seq.take 3
         )
-    |> Seq.toList
-    |> ignore
+    //|> Seq.take 1
+    |> Seq.concat
+    |> fun record -> 
+        Csv.Seq.csv "," true (fun x -> x) record
+        |> Seq.toList
+        |> String.concat System.Environment.NewLine
+        |> fun txt -> System.IO.File.WriteAllText("NDRepresentativeDownload.csv", txt)
     0
