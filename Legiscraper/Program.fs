@@ -103,7 +103,9 @@ module Utils =
             
             let! pageTitle = page.QuerySelectorAsync("h1.page-title") |> getContentTask
             let (title, personName) = 
-                pageTitle
+                pageTitle 
+                |> regexStrip @"^\s*"
+                |> regexStrip @"\s*$"
                 |> TextUtils.regexSplit @"\s+"
                 |> function
                 | [] -> "", ""
@@ -112,7 +114,7 @@ module Utils =
             
             return 
                 {|
-                    Name = personName |> _.Trim()
+                    Name = personName
                     Location = contactlocation
                     PhoneHome = phoneH
                     PhoneOffice = phoneO
