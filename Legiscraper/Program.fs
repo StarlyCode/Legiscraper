@@ -18,12 +18,44 @@ module Types =
             | Firefox -> "Firefox"
             | Webkit -> "Webkit"
 
+    type Spouse = string
+    type ChildeCount = int
+    type GrandchildCount = int
+    type GreatGrandchildCount = int
+    type FamilyDetails =
+        {
+            mutable Spouse: Spouse
+            mutable ChildCount: ChildeCount
+            mutable GrandchildCount: GrandchildCount
+            mutable GreatGrandchildCount: GreatGrandchildCount
+        }
 module TextUtils =
     let regexStrip (pat: string) (inp: string) : string = System.Text.RegularExpressions.Regex.Replace(inp, pat, "", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
     let regexSplit (pat: string) (inp: string) : string list = System.Text.RegularExpressions.Regex.Split(inp, pat, System.Text.RegularExpressions.RegexOptions.IgnoreCase) |> Seq.toList
 open TextUtils
+
+module RegexActivePatterns =
+    open System
+    open System.Text
+    open System.Diagnostics
+    open System.Text.RegularExpressions
+    let ns (x: string) : string = if isNull x then "" else $"{x}"
+    //[<DebuggerHidden>]
+    let private RegexActivePattern (pattern: string) (input: string) options =
+        let ns = ns
+        let regexMatch = Regex.Match(ns input, ns pattern, options)
+        if regexMatch.Success then
+            List.tail [ for g in regexMatch.Groups -> g.Value ]
+            |> Some
+        else
+            None
+
+    [<DebuggerHidden>]
+    let (|Regex|_|) pattern input = RegexActivePattern pattern input RegexOptions.IgnoreCase
+
 module Utils =
     open Types
+    open RegexActivePatterns
     let getBrowser (kind: Browser) (getPlaywright: Task<IPlaywright>) =
         task {
             let! pl = getPlaywright
@@ -43,7 +75,7 @@ module Utils =
                 | Firefox -> pl.Firefox.LaunchAsync()
                 | Webkit -> pl.Webkit.LaunchAsync()
         }
-    
+
     let getLink (element: IElementHandle) =
         task {
             return! element.GetAttributeAsync("href")
@@ -57,7 +89,7 @@ module Utils =
         task {
             let! element2 = element
             if element2 = null then
-                return defaultValue 
+                return defaultValue
             else
                 try
                     return! fn element2
@@ -66,7 +98,7 @@ module Utils =
 
     let getContentTask (element: Task<IElementHandle>) =
         doToNonNullElement "" (fun x -> x.TextContentAsync()) element
-        
+
     let getLinkTask = doToNonNullElement "" (fun element -> element.GetAttributeAsync("href"))
 
     let getPostSummaries (getPage: Task<IPage>) =
@@ -87,23 +119,44 @@ module Utils =
             let! phoneH = page.QuerySelectorAsync(".field--name-field-bio-phone-h div.field__item") |> getContentTask
             let! phoneO = page.QuerySelectorAsync(".field--name-field-bio-phone-o div.field__item") |> getContentTask
             let! phoneC = page.QuerySelectorAsync(".field--name-field-bio-phone-c div.field__item") |> getContentTask
-            let! email = page.QuerySelectorAsync(".field--name-field-person-email2 a") |> getLinkTask 
-            let! bioLines = 
-                page.QuerySelectorAllAsync(".flexbox-item.biography-biography-wrapper li") 
+            let! email = page.QuerySelectorAsync(".field--name-field-person-email2 a") |> getLinkTask
+            let! bioLines =
+                page.QuerySelectorAllAsync(".flexbox-item.biography-biography-wrapper li")
             let! bioLines =
                 bioLines
                 |> Seq.map getContent
                 |> Task.WhenAll
-            let bioLines = bioLines |> Seq.toList
 
-            let bioLine num = 
+            let familyDetails =
+                {
+                    Spouse = ""
+                    ChildCount = 0
+                    GrandchildCount = 0
+                    GreatGrandchildCount = 0
+                }
+            let splitBioData bioText = bioText |> regexSplit @";"
+
+            let bioLines = bioLines |> Seq.toList
+            let bioLine (num: int) : string =
                 bioLines
                 |> List.tryItem num
                 |> Option.defaultValue ""
-            
+                |> fun rawLine ->
+                    splitBioData rawLine |> List.map _.Trim()
+                    |> List.iter
+                        (fun chunk ->
+                            match chunk with
+                            | Regex @"Married \((.*?)\)"          [spouse]             -> familyDetails.Spouse               <- spouse
+                            | Regex @"(\d+) child"                [children]           -> familyDetails.ChildCount           <- int children
+                            | Regex @"(\d+) grandchild"           [grandchildren]      -> familyDetails.GrandchildCount      <- int grandchildren
+                            | Regex @"(\d+) great[\s-]grandchild" [greatgrandchildren] -> familyDetails.GreatGrandchildCount <- int greatgrandchildren
+                            | _ -> ()
+                        )
+                    rawLine
+
             let! pageTitle = page.QuerySelectorAsync("h1.page-title") |> getContentTask
-            let (title, personName) = 
-                pageTitle 
+            let (title, personName) =
+                pageTitle
                 |> regexStrip @"^\s*"
                 |> regexStrip @"\s*$"
                 |> TextUtils.regexSplit @"\s+"
@@ -111,8 +164,7 @@ module Utils =
                 | [] -> "", ""
                 | [x] -> x, ""
                 | x :: xs -> x, String.concat " " xs
-            
-            return 
+            return
                 {|
                     Name = personName
                     Location = contactlocation
@@ -130,6 +182,10 @@ module Utils =
                     bio7 = bioLine 6
                     bio8 = bioLine 7
                     bio9 = bioLine 8
+                    spouse = familyDetails.Spouse
+                    childCount = familyDetails.ChildCount
+                    grandchildCount = familyDetails.GrandchildCount
+                    greatGrandchildCount = familyDetails.GreatGrandchildCount
                 |}
         }
     let getPage (url: string) (page: IPage) =
@@ -140,7 +196,7 @@ module Utils =
                 return failwith "We couldn't navigate to that page"
             return page
         }
-  
+
 open Utils
 open Types
 open System
@@ -149,7 +205,7 @@ let main _ =
     let root = @"https://ndlegis.gov"
     let basePage ix = $@"{root}/assembly/69-2025/regular/members?page=%i{ix}"
     let awaitTask (task: Task<'a>) : 'a = task |> Async.AwaitTask |> Async.RunSynchronously
-    let page = 
+    let page =
         Playwright.CreateAsync()
         |> getBrowser Firefox
         |> awaitTask
@@ -161,7 +217,7 @@ let main _ =
         |> getPage basePage
     [ 0 .. 8 ]
     |> Seq.map
-        (fun ix -> 
+        (fun ix ->
             let url = basePage ix
             getPWatURL url
             |> getPostSummaries
@@ -175,7 +231,7 @@ let main _ =
                     |> getBioDetails
                     |> Async.AwaitTask
                     |> Async.RunSynchronously
-                    |> fun x -> 
+                    |> fun x ->
                         {| x with URL = repURL |}
                 )
             //|> Seq.take 1
@@ -183,12 +239,12 @@ let main _ =
     //|> Seq.take 1
     |> Seq.concat
     |> Seq.toList
-    |> fun records -> 
+    |> fun records ->
         printfn $"Downloaded {records.Length} records in {(DateTime.Now - start).TotalSeconds} seconds"
         Csv.Seq.csv "," true (fun x -> x) records
         |> Seq.toList
         |> String.concat System.Environment.NewLine
-        |> fun txt -> 
+        |> fun txt ->
             let ts = System.DateTime.Now.Ticks
             System.IO.File.WriteAllText($"NDRepresentativeDownload_{ts}.csv", txt)
     0
